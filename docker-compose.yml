@@ -1,33 +1,4 @@
-version: '3.8'
-
 services:
-  superset:
-    build:
-      context: .
-      dockerfile: dockerfile.superset
-    ports:
-      - "8088:8088"
-    environment:
-      SUPERSET_SECRET_KEY: 'generate_a_long_random_string_here'
-      SUPERSET_SQLALCHEMY_DATABASE_URI: 'postgresql+psycopg2://superset:superset_pass@superset_db:5432/superset'
-    depends_on:
-      superset_db:
-        condition: service_healthy
-
-  superset_db:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: superset
-      POSTGRES_PASSWORD: superset_pass
-      POSTGRES_DB: superset
-    volumes:
-      - ./data/superset_db:/var/lib/postgresql/data  # <--- Host path bind mount
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U superset"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
   rust_etl:
     image: superset-rust-stack-etl:latest  # <--- Change to your uploaded image tag
     pull_policy: never
@@ -41,3 +12,9 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ./config.toml:/app/config.toml
       - ./sp500_tech.json:/app/sp500_tech.json
+    networks:
+      - superset-network
+
+networks:
+  superset-network:
+    external: true
