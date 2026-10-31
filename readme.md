@@ -1,9 +1,107 @@
-# Superset Rust ETL — Options & Fundamentals Pipeline
-
+# Rust ETL to PostgreSQL — Options & Fundamentals Pipeline
 A high-performance, asynchronous ETL (Extract, Transform, Load) pipeline built with **Rust**, designed to collect, process, and store financial market data from Yahoo Finance.
+The data will be present in reporting format using Apache Superset
 
 The pipeline retrieves stock fundamentals, earnings estimates, historical financial metrics, and options chain data. It also performs financial calculations, including **Black-Scholes option Greeks**, before persisting the processed data into **PostgreSQL / TimescaleDB** for advanced financial analysis, quantitative research, and Apache Superset dashboarding.
 
+
+# Docker Network Prerequisite
+
+If Rust ETL and Apache Superset are deployed using separate Docker Compose projects, both projects must share a Docker network to communicate with each other. (I have include both docker compose file, refer docker-compose-superset.yml and docker-compose.yml)
+
+Create a shared external Docker network before starting either Compose project.
+
+### 1. Create Shared Docker Network
+
+```bash
+docker network create superset-network
+```
+
+Verify that the network was created:
+
+```bash
+docker network ls
+```
+
+### 2. Configure Docker Compose
+
+Add the following network configuration to both Docker Compose files.
+
+**For the Superset `docker-compose.yml`:**
+
+Attach both `superset` and `superset_db` services to the shared network.
+
+**For the Rust ETL `docker-compose.yml`:**
+
+Attach the `rust_etl` service to the same shared network.
+
+Add the following network declaration to the bottom of both Compose files:
+
+```yaml
+networks:
+  superset-network:
+    external: true
+```
+
+Each relevant service must also include:
+
+```yaml
+networks:
+  - superset-network
+```
+
+### 3. Configure Database Connection
+
+Containers connected to the same Docker network can communicate using Docker's service DNS names.
+
+For example, if Rust ETL connects to the Superset PostgreSQL database:
+
+```env
+DATABASE_URL=postgresql://superset:superset_pass@superset_db:5432/superset
+```
+
+**Important:** Replace `localhost` with the appropriate Docker service name when connecting to another container.
+
+If your ETL writes to a separate TimescaleDB instance, configure `DATABASE_URL` using that database's hostname and port instead.
+
+### 4. Deploy Independent Compose Projects
+
+Start the Superset stack:
+
+```bash
+cd /u02/docker/superset
+docker compose up -d --build
+```
+
+Start the Rust ETL stack:
+
+```bash
+cd /u02/docker/rust-etl
+docker compose up -d
+```
+
+### 5. Verify Network Connectivity
+
+Inspect the shared network:
+
+```bash
+docker network inspect superset-network
+```
+
+Verify that both Compose projects' containers are connected to the network.
+
+Test database hostname resolution from the Rust ETL container:
+
+```bash
+docker exec rust_etl_job getent hosts superset_db
+```
+
+A successful DNS lookup should return the PostgreSQL container's internal Docker IP address.
+
+**Note:** The external network must exist before deploying either Compose project. It is created once and can be reused across subsequent deployments.
+
+
+# Rust ETL to PostgreSQL (TimescaleDB extension)
 ## Architecture
 
 The pipeline is organized into four logical data layers, with Layers 3 and 5 sharing the same options-processing domain.
