@@ -8,19 +8,20 @@ pub async fn run_etl_for_ticker(
     db_pool: &PgPool,
     yahoo_client: &YahooClient,
     symbol: &str,
-    options_only: bool, // <--- ADDED THIS PARAMETER
+    options_only: bool,
+    screener_tag: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    println!("--------------------------------------------------");
-    println!("Starting ETL Pipeline for: {} (Options Only: {})", symbol, options_only);
+    crate::log_info!("--------------------------------------------------");
+    crate::log_info!("Starting ETL Pipeline for: {} (Options Only: {})", symbol, options_only);
 
     // ONLY RUN L1 & L2 IF WE ARE DOING A FULL RUN
     if !options_only {
         // 1. Layer 1 Execution (Fundamentals)
-        if let Some(record) = yahoo_client.fetch_layer1_fundamentals(symbol).await? {
+        if let Some(record) = yahoo_client.fetch_layer1_fundamentals(symbol, screener_tag).await? { // <--- Pass tag here            db::insert_layer1_fundamentals(db_pool, &record).await?;
             db::insert_layer1_fundamentals(db_pool, &record).await?;
-            println!("  [L1] Fundamentals inserted.");
+            crate::log_info!("  [L1] Fundamentals inserted.");
         } else {
-            println!("  [L1] Skipped (No fundamental data returned).");
+            crate::log_info!("  [L1] Skipped (No fundamental data returned).");
         }
 
         // 2. Layer 2 Execution (Earnings History)
@@ -28,9 +29,9 @@ pub async fn run_etl_for_ticker(
         for record in &earnings_records {
             db::insert_layer2_earnings(db_pool, record).await?;
         }
-        println!("  [L2] Saved {} earnings records.", earnings_records.len());
+        crate::log_info!("  [L2] Saved {} earnings records.", earnings_records.len());
     } else {
-        println!("  [L1/L2] Skipped (Options-Only Mode).");
+        crate::log_info!("  [L1/L2] Skipped (Options-Only Mode).");
     }
 
     // ALWAYS RUN L3/L5 & L4
@@ -42,7 +43,7 @@ pub async fn run_etl_for_ticker(
     for snapshot in &greeks_snapshots {
         db::insert_layer3_5_greeks(db_pool, snapshot).await?;
     }
-    println!("  [L3/L5] Saved {} Option Greek snapshots.", greeks_snapshots.len());
+    crate::log_info!("  [L3/L5] Saved {} Option Greek snapshots.", greeks_snapshots.len());
 
     // 4. Layer 4 Execution (Volatility Reality Check)
     if let Some(first_contract) = greeks_snapshots.first() {
@@ -57,10 +58,10 @@ pub async fn run_etl_for_ticker(
             iv_rank,
         )
         .await?;
-        println!("  [L4] Volatility check calculated.");
+        crate::log_info!("  [L4] Volatility check calculated.");
     }
 
-    println!("Completed ETL for {}", symbol);
+    crate::log_info!("Completed ETL for {}", symbol);
     Ok(())
 }
 
@@ -68,25 +69,25 @@ pub async fn reconcile_all_unreconciled(
     db_pool: &PgPool,
     yahoo_client: &YahooClient,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    println!("--------------------------------------------------");
-    println!("Starting Global L2 & L4 Reconciliation");
+    crate::log_info!("--------------------------------------------------");
+    crate::log_info!("Starting Global L2 & L4 Reconciliation");
 
     let l2_symbols = db::get_unreconciled_symbols(db_pool).await?;
-    println!("  [Reconcile] Found {} symbols pending L2/L4 reconciliation.", l2_symbols.len());
+    crate::log_info!("  [Reconcile] Found {} symbols pending L2/L4 reconciliation.", l2_symbols.len());
 
     for symbol in l2_symbols {
         if let Err(e) = reconcile_l2_earnings(db_pool, yahoo_client, &symbol).await {
-            eprintln!("  ❌ L2 Reconciliation failed for {}: {}", symbol, e);
+            crate::log_err!("  ❌ L2 Reconciliation failed for {}: {}", symbol, e);
         }
         
         if let Err(e) = reconcile_l4_volatility(db_pool, yahoo_client, &symbol).await {
-            eprintln!("  ❌ L4 Reconciliation failed for {}: {}", symbol, e);
+            crate::log_err!("  ❌ L4 Reconciliation failed for {}: {}", symbol, e);
         }
         
         sleep(Duration::from_millis(1500)).await;
     }
 
-    println!("Global Reconciliation Complete.");
+    crate::log_info!("Global Reconciliation Complete.");
     Ok(())
 }
 
@@ -95,11 +96,11 @@ pub async fn reconcile_l2_earnings(
     yahoo_client: &YahooClient,
     symbol: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    println!("Running L2 Earnings Reconciliation for: {}", symbol);
+    crate::log_info!("Running L2 Earnings Reconciliation for: {}", symbol);
 
     let records = db::get_unreconciled_l2_records(db_pool, symbol).await?;
     if records.is_empty() {
-        println!("  [L2 Reconcile] All records up to date.");
+        crate::log_info!("  [L2 Reconcile] All records up to date.");
         return Ok(());
     }
 
@@ -134,7 +135,7 @@ pub async fn reconcile_l2_earnings(
         )
         .await?;
 
-        println!(
+        crate::log_info!(
             "  [L2 Reconcile] Updated {} ({}): Actual Rev = {:?}, Rev Surprise = {:?}, EPS Surprise = {:?}",
             rec.symbol, rec.market_time, matched_revenue, calculated_rev_surprise, calculated_eps_surprise
         );
@@ -149,18 +150,18 @@ pub async fn reconcile_l4_volatility(
     yahoo_client: &YahooClient,
     symbol: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    println!("Running L4 Volatility Reconciliation for: {}", symbol);
+    crate::log_info!("Running L4 Volatility Reconciliation for: {}", symbol);
 
     let records = db::get_unreconciled_l4_records(db_pool, symbol).await?;
     if records.is_empty() {
-        println!("  [L4 Reconcile] All records up to date.");
+        crate::log_info!("  [L4 Reconcile] All records up to date.");
         return Ok(());
     }
 
     // Fetch latest stock price from Yahoo
     let (current_price, _) = yahoo_client.fetch_layer3_5_options_greeks(symbol, 1).await?;
     if current_price <= 0.0 {
-        println!("  [L4 Reconcile] Skipped (Could not fetch current stock price).");
+        crate::log_info!("  [L4 Reconcile] Skipped (Could not fetch current stock price).");
         return Ok(());
     }
 
@@ -185,7 +186,7 @@ pub async fn reconcile_l4_volatility(
         )
         .await?;
 
-        println!(
+        crate::log_info!(
             "  [L4 Reconcile] Updated {} (Pre: ${:.2} -> Post: ${:.2}): Actual Move = {:.2}%, Vol Ratio = {:.2}",
             rec.symbol, rec.pre_er_stock_price, current_price, actual_move_pct * 100.0, volatility_ratio
         );

@@ -4,6 +4,26 @@ mod pipeline;
 mod screener;
 mod yahoo;
 
+// ==========================================
+// CUSTOM LOGGING MACROS WITH TIMESTAMPS
+// ==========================================
+#[macro_export]
+macro_rules! log_info {
+    ($($arg:tt)*) => {
+        // This MUST be println!, not crate::log_info!
+        println!("[{}] {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), format_args!($($arg)*));
+    };
+}
+
+#[macro_export]
+macro_rules! log_err {
+    ($($arg:tt)*) => {
+        // This MUST be eprintln!, not crate::log_err!
+        eprintln!("[{}] ❌ ERROR: {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), format_args!($($arg)*));
+    };
+}
+// ==========================================
+
 use config::{Config, File};
 use serde::Deserialize;
 use std::env;
@@ -71,27 +91,26 @@ async fn execute_job(
     mode: ScreenerMode,
     db_pool: Arc<PgPool>,
     yahoo_client: Arc<YahooClient>,
-    options_only: bool, // <--- ADD THIS
+    options_only: bool, 
 ) {
-    println!("Starting Job: {}", job_name);
+    crate::log_info!("Starting Job: {}", job_name);
+    let tag = mode.as_tag(); 
     
-    let tickers = match Screener::resolve_tickers(&yahoo_client, mode).await {
+    let tickers = match Screener::resolve_tickers(&yahoo_client, mode.clone()).await {        
         Ok(t) => t,
         Err(e) => {
-            eprintln!("Failed to resolve tickers for {}: {}", job_name, e);
+            crate::log_err!("Failed to resolve tickers for {}: {}", job_name, e);
             return;
         }
     };
 
     for symbol in tickers {
-        // Pass the flag down to the pipeline
-        if let Err(e) = pipeline::run_etl_for_ticker(&db_pool, &yahoo_client, &symbol, options_only).await {
-            eprintln!("  ❌ ETL failed for {}: {}", symbol, e);
+        // Pass the tag string down to the pipeline
+        if let Err(e) = pipeline::run_etl_for_ticker(&db_pool, &yahoo_client, &symbol, options_only, &tag).await {
+            crate::log_err!("  ❌ ETL failed for {}: {}", symbol, e);
         }
         sleep(Duration::from_millis(1500)).await;
     }
-    
-    println!("Completed Job: {}", job_name);
 }
 
 #[tokio::main]
@@ -105,7 +124,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let enable_scheduler = env::var("ENABLE_SCHEDULER").unwrap_or_else(|_| "false".to_string()) == "true";
 
     if enable_scheduler {
-        println!("ENABLE_SCHEDULER=true. Starting in daemon mode...");
+        crate::log_info!("ENABLE_SCHEDULER=true. Starting in daemon mode...");
         
         let settings = Config::builder()
             .add_source(File::with_name("config.toml"))
@@ -127,7 +146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 let mode_str = mode_str.clone();
 
                 Box::pin(async move {
-                    println!("Starting Scheduled Job: {}", job_name);
+                    crate::log_info!("Starting Scheduled Job: {}", job_name);
                     
                     // Inside the scheduled job closure:
                     let is_options_only = mode_str.contains("--options-only");
@@ -147,14 +166,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             })?;
 
             sched.add(job).await?;
-            println!("Scheduled '{}' with cron: {}", job_cfg.name, job_cfg.cron);
+            crate::log_info!("Scheduled '{}' with cron: {}", job_cfg.name, job_cfg.cron);
         }
 
         sched.start().await?;
-        println!("Scheduler started. Application is running in daemon mode.");
+        crate::log_info!("Scheduler started. Application is running in daemon mode.");
         
         tokio::signal::ctrl_c().await?;
-        println!("Shutdown signal received. Exiting daemon...");
+        crate::log_info!("Shutdown signal received. Exiting daemon...");
 
     } else {
         // MANUAL RUN MODE via CLI args
@@ -166,19 +185,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         };
 
         if target_mode == "--reconcile-all" {
-            println!("ENABLE_SCHEDULER=false. Running global reconciliation...");
+            crate::log_info!("ENABLE_SCHEDULER=false. Running global reconciliation...");
             if let Err(e) = pipeline::reconcile_all_unreconciled(&db_pool, &yahoo_client).await {
-                eprintln!("Global reconciliation failed: {}", e);
+                crate::log_err!("Global reconciliation failed: {}", e);
             }
         } else if target_mode.starts_with("--reconcile") {
             let symbol = target_mode.trim_start_matches("--reconcile").trim();
-            println!("ENABLE_SCHEDULER=false. Running single reconciliation for {}...", symbol);
+            crate::log_info!("ENABLE_SCHEDULER=false. Running single reconciliation for {}...", symbol);
             if let Err(e) = pipeline::reconcile_l2_earnings(&db_pool, &yahoo_client, symbol).await {
-                eprintln!("Reconciliation failed: {}", e);
+                crate::log_err!("Reconciliation failed: {}", e);
             }
         } else {
             // FIXED MANUAL RUN MODE
-            println!("ENABLE_SCHEDULER=false. Running in manual CLI mode...");
+            crate::log_info!("ENABLE_SCHEDULER=false. Running in manual CLI mode...");
             
             // Extract the flag for manual runs
             let is_options_only = target_mode.contains("--options-only");

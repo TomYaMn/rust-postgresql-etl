@@ -1,5 +1,6 @@
 use crate::yahoo::YahooClient;
 use std::fs;
+use chrono::Utc; 
 
 #[derive(Clone, Debug)]
 pub enum ScreenerMode {
@@ -15,6 +16,31 @@ pub enum ScreenerMode {
     CustomFile(String), // Add this new mode for custom JSON files
 }
 
+// ---> THIS IS THE NEW BLOCK WE NEED TO ADD <---
+impl ScreenerMode {
+    pub fn as_tag(&self) -> String {
+        // Get today's date in YYYY-MM-DD format
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+
+        let base_tag = match self {
+            ScreenerMode::Sp500Tech => "SP500_TECH",
+            ScreenerMode::TopGainers => "TOP_GAINERS",
+            ScreenerMode::TopLosers => "TOP_LOSERS",
+            ScreenerMode::MostActive => "MOST_ACTIVE",
+            ScreenerMode::MostVolatile => "MOST_VOLATILE",
+            ScreenerMode::UnusualVolume => "UNUSUAL_VOLUME",
+            ScreenerMode::New52WeekHigh => "52_WEEK_HIGH",
+            ScreenerMode::EarningsToday => "EARNINGS_TODAY",
+            ScreenerMode::Custom(_) => "CUSTOM_CLI",
+            ScreenerMode::CustomFile(_) => "CUSTOM_FILE",
+        };
+
+        // Output example: "TOP_GAINERS_2026-10-31"
+        format!("{}_{}", base_tag, today)
+    }
+}
+// -----------------------------------------------
+
 pub struct Screener;
 
 impl Screener {
@@ -24,14 +50,13 @@ impl Screener {
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         match mode {
             ScreenerMode::Sp500Tech => {
-                println!("Loading predefined S&P 500 Tech json file");
+                crate::log_info!("Loading predefined S&P 500 Tech json file");
                 let content = fs::read_to_string("sp500_tech.json")?;
                 let tickers: Vec<String> = serde_json::from_str(&content)?;
                 Ok(tickers)
             }
-            // NEW: Custom JSON File Reader with explicit error handling
             ScreenerMode::CustomFile(filepath) => {
-                println!("Loading custom JSON file: {}", filepath);
+                crate::log_info!("Loading custom JSON file: {}", filepath);
                 let content = fs::read_to_string(&filepath)
                     .map_err(|e| format!("CRITICAL ERROR: Failed to read JSON file '{}' - {}", filepath, e))?;
                 let tickers: Vec<String> = serde_json::from_str(&content)
@@ -39,35 +64,35 @@ impl Screener {
                 Ok(tickers)
             }
             ScreenerMode::TopGainers => {
-                println!("Querying Yahoo Screener for Top Gainers...");
+                crate::log_info!("Querying Yahoo Screener for Top Gainers...");
                 Ok(client.fetch_screener("day_gainers", 25).await?)
             }
             ScreenerMode::TopLosers => {
-                println!("Querying Yahoo Screener for Top Losers...");
+                crate::log_info!("Querying Yahoo Screener for Top Losers...");
                 Ok(client.fetch_screener("day_losers", 25).await?)
             }
             ScreenerMode::MostActive => {
-                println!("Querying Yahoo Screener for Most Active Volume...");
+                crate::log_info!("Querying Yahoo Screener for Most Active Volume...");
                 Ok(client.fetch_screener("most_actives", 25).await?)
             }
             ScreenerMode::MostVolatile => {
-                println!("Querying Yahoo Screener for Most Volatile...");
+                crate::log_info!("Querying Yahoo Screener for Most Volatile...");
                 Ok(client.fetch_screener("aggressive_small_caps", 25).await?)
             }
             ScreenerMode::UnusualVolume => {
-                println!("Querying Yahoo Screener for Unusual Volume...");
+                crate::log_info!("Querying Yahoo Screener for Unusual Volume...");
                 Ok(client.fetch_screener("unusual_volume", 25).await?)
             }
             ScreenerMode::New52WeekHigh => {
-                println!("Querying Yahoo Screener for New 52-Week Highs...");
+                crate::log_info!("Querying Yahoo Screener for New 52-Week Highs...");
                 Ok(client.fetch_screener("52_week_gainers", 25).await?)
             }
             ScreenerMode::EarningsToday => {
-                println!("Querying Earnings Today...");
+                crate::log_info!("Querying Earnings Today...");
                 Ok(client.fetch_screener("earnings_today", 25).await?)
             }
             ScreenerMode::Custom(list) => {
-                println!("Loading Custom Watchlist...");
+                crate::log_info!("Loading Custom Watchlist...");
                 Ok(list)
             }
         }

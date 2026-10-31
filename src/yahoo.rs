@@ -63,8 +63,8 @@ impl YahooClient {
         Ok(symbols)
     }
 
-    pub async fn fetch_layer1_fundamentals(&self, symbol: &str) -> Result<Option<FundamentalsRecord>, Box<dyn std::error::Error + Send + Sync>> {
-            let url = format!(
+    pub async fn fetch_layer1_fundamentals(&self, symbol: &str, screener_tag: &str) -> Result<Option<FundamentalsRecord>, Box<dyn std::error::Error + Send + Sync>> {            
+        let url = format!(
                 "https://query1.finance.yahoo.com/v10/finance/quoteSummary/{}?modules=defaultKeyStatistics,financialData&crumb={}",
                 symbol, self.crumb
             );
@@ -102,6 +102,7 @@ impl YahooClient {
 
                 return Ok(Some(FundamentalsRecord {
                     symbol: symbol.to_string(),
+                    screener_tag: screener_tag.to_string(), 
                     revenue_growth: fin.and_then(|f| f.revenue_growth.as_ref()).and_then(|r| r.raw),
                     eps_growth,
                     gross_margin: fin.and_then(|f| f.gross_margins.as_ref()).and_then(|m| m.raw),

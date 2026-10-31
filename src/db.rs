@@ -32,9 +32,9 @@ pub async fn insert_layer1_fundamentals(pool: &PgPool, record: &FundamentalsReco
         INSERT INTO l1_fundamentals_quarterly (
             report_date, symbol, fiscal_period, revenue_growth_yoy, eps_growth_yoy,
             gross_margin, operating_margin, roic, free_cash_flow, fcf_margin,
-            debt_to_equity, pe_ratio, ev_to_ebitda, shares_outstanding
+            debt_to_equity, pe_ratio, ev_to_ebitda, shares_outstanding, screener_tag
         )
-        VALUES (DATE_TRUNC('day', $1::TIMESTAMPTZ), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        VALUES (DATE_TRUNC('day', $1::TIMESTAMPTZ), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         ON CONFLICT (symbol, fiscal_period, report_date)
         DO UPDATE SET 
             revenue_growth_yoy = EXCLUDED.revenue_growth_yoy,
@@ -47,7 +47,8 @@ pub async fn insert_layer1_fundamentals(pool: &PgPool, record: &FundamentalsReco
             debt_to_equity = EXCLUDED.debt_to_equity,
             pe_ratio = EXCLUDED.pe_ratio,
             ev_to_ebitda = EXCLUDED.ev_to_ebitda,
-            shares_outstanding = EXCLUDED.shares_outstanding
+            shares_outstanding = EXCLUDED.shares_outstanding,
+            screener_tag = EXCLUDED.screener_tag
     "#;
 
     sqlx::query(query)
@@ -55,7 +56,7 @@ pub async fn insert_layer1_fundamentals(pool: &PgPool, record: &FundamentalsReco
         .bind(record.eps_growth).bind(record.gross_margin).bind(record.operating_margin)
         .bind(record.roic).bind(record.free_cash_flow).bind(record.fcf_margin)
         .bind(record.debt_to_equity).bind(record.pe_ratio).bind(record.ev_to_ebitda)
-        .bind(record.shares_outstanding)
+        .bind(record.shares_outstanding).bind(&record.screener_tag) // <--- ADD THIS BIND
         .execute(pool).await?;
 
     Ok(())

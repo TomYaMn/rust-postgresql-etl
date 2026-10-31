@@ -194,6 +194,7 @@ pub struct Contract {
 // --- Internal Domain Containers ---
 pub struct FundamentalsRecord {
     pub symbol: String,
+    pub screener_tag: String,
     pub revenue_growth: Option<f64>,
     pub eps_growth: Option<f64>,               // <--- ADD THIS
     pub gross_margin: Option<f64>,

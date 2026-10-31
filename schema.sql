@@ -78,8 +78,6 @@ CREATE INDEX idx_l4_symbol_date ON l4_volatility_reality_check (symbol, earnings
 
 
 -- 4th Oct - remove duplicate entry when api called multiple time feature
-
-
 -- 1. LAYER 1: Fundamentals
 DELETE FROM l1_fundamentals_quarterly WHERE ctid IN (
     SELECT ctid FROM (SELECT ctid, ROW_NUMBER() OVER(PARTITION BY symbol, fiscal_period ORDER BY report_date DESC) as rn FROM l1_fundamentals_quarterly) t WHERE t.rn > 1
@@ -107,3 +105,8 @@ DELETE FROM l4_volatility_reality_check WHERE ctid IN (
 );
 UPDATE l4_volatility_reality_check SET earnings_date = DATE_TRUNC('day', earnings_date);
 ALTER TABLE l4_volatility_reality_check ADD CONSTRAINT uq_l4 UNIQUE (symbol, earnings_date);
+
+
+
+-- 31th Oct - add tag to the extracted symbol/companies
+ALTER TABLE l1_fundamentals_quarterly ADD COLUMN screener_tag VARCHAR(50);
