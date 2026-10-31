@@ -193,7 +193,7 @@ impl YahooClient {
         Ok(records)
     }
 
-    pub async fn fetch_layer3_5_options_greeks(
+pub async fn fetch_layer3_5_options_greeks(
         &self,
         symbol: &str,
         contract_limit: usize,
@@ -225,64 +225,68 @@ impl YahooClient {
         let options_data = &result_item.options[0];
         let snapshot_time = Utc::now();
 
-        // Inside fetch_layer3_5_options_greeks in src/yahoo.rs
+        // Helper closure to process both Calls and Puts dynamically
+        let mut process_contracts = |contracts: &[crate::models::Contract], opt_type_str: &str, bs_opt_type: OptionType| {
+            for contract in contracts.iter().take(contract_limit) {
+                let expiration_date = DateTime::from_timestamp(contract.expiration, 0).unwrap_or_else(Utc::now);
+                let days_to_expiration = (expiration_date.date_naive() - snapshot_time.date_naive()).num_days() as i32;
 
-        for contract in options_data.calls.iter().take(contract_limit) {
-            let expiration_date = DateTime::from_timestamp(contract.expiration, 0).unwrap_or_else(Utc::now);
-            let days_to_expiration = (expiration_date.date_naive() - snapshot_time.date_naive()).num_days() as i32;
+                if days_to_expiration <= 0 {
+                    continue; 
+                }
 
-            // Guard against expired or 0-DTE options causing NaN in Black-Scholes
-            if days_to_expiration <= 0 {
-                continue; // Skip expired options
+                let t_years = (days_to_expiration as f32) / 365.25;
+                let last_price = contract.last_price.unwrap_or(0.0);
+                let bid = contract.bid.unwrap_or(0.0);
+                let ask = contract.ask.unwrap_or(0.0);
+                let iv = contract.implied_volatility.unwrap_or(0.0);
+
+                let (delta, gamma, theta, vega) = if iv > 0.0 && t_years > 0.0 {
+                    let bs_inputs = Inputs::new(
+                        bs_opt_type.clone(), // <--- ADD .clone() HERE
+                        current_stock_price as f32,
+                        contract.strike as f32,
+                        Some(last_price as f32),
+                        0.045,
+                        0.0,
+                        t_years,
+                        Some(iv as f32),
+                    );
+
+                    (
+                        bs_inputs.calc_delta().unwrap_or(0.0) as f64,
+                        bs_inputs.calc_gamma().unwrap_or(0.0) as f64,
+                        (bs_inputs.calc_theta().unwrap_or(0.0) / 365.25) as f64,
+                        (bs_inputs.calc_vega().unwrap_or(0.0) / 100.0) as f64,
+                    )
+                } else {
+                    (0.0, 0.0, 0.0, 0.0)
+                };
+
+                snapshots.push(OptionGreekSnapshot {
+                    symbol: symbol.to_string(),
+                    contract_symbol: contract.contract_symbol.clone(),
+                    expiration_date: expiration_date.date_naive(),
+                    days_to_expiration,
+                    strike: contract.strike,
+                    option_type: opt_type_str.to_string(), // Passes "CALL" or "PUT"
+                    bid,
+                    ask,
+                    last_price,
+                    volume: contract.volume,
+                    open_interest: contract.open_interest,
+                    implied_volatility: iv,
+                    delta,
+                    gamma,
+                    theta,
+                    vega,
+                });
             }
+        };
 
-            let t_years = (days_to_expiration as f32) / 365.25;
-            let last_price = contract.last_price.unwrap_or(0.0);
-            let bid = contract.bid.unwrap_or(0.0);
-            let ask = contract.ask.unwrap_or(0.0);
-            let iv = contract.implied_volatility.unwrap_or(0.0);
-
-            let (delta, gamma, theta, vega) = if iv > 0.0 && t_years > 0.0 {
-                let bs_inputs = Inputs::new(
-                    OptionType::Call,
-                    current_stock_price as f32,
-                    contract.strike as f32,
-                    Some(last_price as f32),
-                    0.045,
-                    0.0,
-                    t_years,
-                    Some(iv as f32),
-                );
-
-                (
-                    bs_inputs.calc_delta().unwrap_or(0.0) as f64,
-                    bs_inputs.calc_gamma().unwrap_or(0.0) as f64,
-                    (bs_inputs.calc_theta().unwrap_or(0.0) / 365.25) as f64,
-                    (bs_inputs.calc_vega().unwrap_or(0.0) / 100.0) as f64,
-                )
-            } else {
-                (0.0, 0.0, 0.0, 0.0)
-            };
-
-            snapshots.push(OptionGreekSnapshot {
-                symbol: symbol.to_string(),
-                contract_symbol: contract.contract_symbol.clone(),
-                expiration_date: expiration_date.date_naive(),
-                days_to_expiration,
-                strike: contract.strike,
-                option_type: "CALL".to_string(),
-                bid,
-                ask,
-                last_price,
-                volume: contract.volume,
-                open_interest: contract.open_interest,
-                implied_volatility: iv,
-                delta,
-                gamma,
-                theta,
-                vega,
-            });
-        }
+        // Process both arrays
+        process_contracts(&options_data.calls, "CALL", OptionType::Call);
+        process_contracts(&options_data.puts, "PUT", OptionType::Put);
 
         Ok((current_stock_price, snapshots))
     }
